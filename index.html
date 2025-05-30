@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>ドル円ローソク足チャートとRSIシグナル</title>
+
+  <!-- Chart.js v3.7.1 -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
+
+  <!-- chartjs-adapter-date-fns -->
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+
+  <!-- chartjs-chart-financial -->
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.1.0-beta.11/dist/chartjs-chart-financial.min.js"></script>
+
+  <style>
+    body {
+      background-color: #1c1c1c;
+      color: #fff;
+      font-family: sans-serif;
+      text-align: center;
+      padding: 30px;
+    }
+    canvas {
+      max-width: 800px;
+      margin: auto;
+      background-color: #fff;
+      border-radius: 10px;
+    }
+    .card {
+      background-color: #2e2e2e;
+      padding: 30px;
+      border-radius: 12px;
+      display: inline-block;
+      box-shadow: 0 0 15px rgba(255,255,255,0.1);
+      margin-top: 20px;
+    }
+    .signal {
+      font-size: 1.5rem;
+      margin-top: 20px;
+      font-weight: bold;
+    }
+    .buy {
+      color: #00ff99;
+    }
+    .sell {
+      color: #ff4d4d;
+    }
+    .wait {
+      color: #cccccc;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>ドル円ローソク足チャートとRSIシグナル</h1>
+  <canvas id="candlestickChart" width="800" height="400"></canvas>
+
+  <div class="card">
+    <h2>ドル円レート（USD/JPY）</h2>
+    <p id="rate">取得中...</p>
+    <p>RSI: <span id="rsi">-</span></p>
+    <div id="signal" class="signal">判定中...</div>
+  </div>
+
+  <script>
+    // Chart.js スケールとプラグインの登録
+    Chart.register(
+      Chart.registry.getScale('time'),
+      Chart.registry.getScale('linear'),
+      Chart.Tooltip,
+      Chart.Legend
+    );
+
+    const ctx = document.getElementById('candlestickChart').getContext('2d');
+    const candlestickChart = new Chart(ctx, {
+      type: 'candlestick',
+      data: {
+        datasets: [{
+          label: 'USD/JPY',
+          data: []
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          x: {
+            type: 'time',
+            time: {
+              unit: 'minute'
+            },
+            ticks: {
+              color: '#fff'
+            }
+          },
+          y: {
+            ticks: {
+              color: '#fff'
+            }
+          }
+        },
+        plugins: {
+          legend: {
+            labels: {
+              color: '#fff'
+            }
+          }
+        }
+      }
+    });
+
+    const closePrices = [];
+
+    function calculateRSI(prices, period = 14) {
+      if (prices.length < period + 1) return null;
+      let gains = 0;
+      let losses = 0;
+      for (let i = prices.length - period; i < prices.length; i++) {
+        const diff = prices[i] - prices[i - 1];
+        if (diff >= 0) {
+          gains += diff;
+        } else {
+          losses -= diff;
+        }
+      }
+      const averageGain = gains / period;
+      const averageLoss = losses / period;
+      if (averageLoss === 0) return 100;
+      const rs = averageGain / averageLoss;
+      return 100 - (100 / (1 + rs));
+    }
+
+    function updateRSISignal(rsi) {
+      const signalEl = document.getElementById("signal");
+      const rsiEl = document.getElementById("rsi");
+      rsiEl.textContent = rsi ? rsi.toFixed(2) : "-";
+      signalEl.classList.remove("buy", "sell", "wait");
+      if (rsi === null) {
+        signalEl.textContent = "データ不足";
+        signalEl.classList.add("wait");
+      } else if (rsi < 30) {
+        signalEl.textContent = "💡 買いのチャンス！";
+        signalEl.classList.add("buy");
+      } else if (rsi > 70) {
+        signalEl.textContent = "⚠️ 売りのサイン！";
+        signalEl.classList.add("sell");
+      } else {
+        signalEl.textContent = "様子見（中立）";
+        signalEl.classList.add("wait");
+      }
+    }
+
+    const initialTime = new Date();
+    for (let i = 0; i < 20; i++) {
+      const time = new Date(initialTime.getTime() - (20 - i) * 60 * 1000);
+      const open = 157 + Math.random();
+      const close = open + (Math.random() - 0.5);
+      const high = Math.max(open, close) + Math.random() * 0.5;
+      const low = Math.min(open, close) - Math.random() * 0.5;
+
+      candlestickChart.data.datasets[0].data.push({
+        x: time,
+        o: open,
+        h: high,
+        l: low,
+        c: close
+      });
+      closePrices.push(close);
+    }
+    candlestickChart.update();
+
+    setInterval(() => {
+      fetch('https://api.unirateapi.com/api/rates?api_key=h65qd0ij5fNu2TlJkWtzaiDSss70pXNVDHLYUTfrFjD2az8limCXMVBbaEf5BBZT&from=USD')
+        .then(response => response.json())
+        .then(data => {
+          const rate = data.rates.JPY;
+          const now = new Date();
+          const fluctuation = (Math.random() - 0.5) * 0.2;
+          const open = rate - 0.1;
+          const close = rate;
+          const high = rate + fluctuation;
+          const low = rate - fluctuation;
+          const newPoint = {
+            x: now,
+            o: open,
+            h: high,
+            l: low,
+            c: close
+          };
+          candlestickChart.data.datasets[0].data.push(newPoint);
+          if (candlestickChart.data.datasets[0].data.length > 20) {
+            candlestickChart.data.datasets[0].data.shift();
+          }
+          candlestickChart.update();
+
+          document.getElementById("rate").textContent = rate.toFixed(2);
+
+          closePrices.push(close);
+          if (closePrices.length > 100) {
+            closePrices.shift();
+          }
+          const rsi = calculateRSI(closePrices);
+          updateRSISignal(rsi);
+        })
+        .catch(err => {
+          console.error("為替データ取得失敗:", err);
+          document.getElementById("rate").textContent = "取得失敗";
+          updateRSISignal(null);
+        });
+    }, 10000);
+  </script>
+
+</body>
+</html>
