@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>複数通貨チャートとRSIシグナル</title>
+  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+
+  <style>
+    body {
+      background-color: #1c1c1c;
+      color: #fff;
+      font-family: sans-serif;
+      text-align: center;
+      padding: 30px;
+    }
+
+    h1 {
+      margin-bottom: 30px;
+    }
+
+    .chart-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 40px;
+    }
+
+    .chart-box {
+      position: relative;
+      background-color: #2e2e2e;
+      padding: 10px;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
+      height: 500px;
+    }
+
+    .chart-box .alert-overlay {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-weight: bold;
+      font-size: 1rem;
+      z-index: 10;
+      display: none;
+      color: #000;
+    }
+
+    .alert-buy {
+      background-color: #00ff99;
+      color: #000;
+    }
+
+    .alert-sell {
+      background-color: #ff4d4d;
+      color: #000;
+    }
+
+    .alert-wait {
+      background-color: #cccccc;
+      color: #000;
+    }
+
+    .card {
+      background-color: #2e2e2e;
+      padding: 30px;
+      border-radius: 12px;
+      display: inline-block;
+      box-shadow: 0 0 15px rgba(255,255,255,0.1);
+    }
+
+    .signal {
+      font-size: 1.5rem;
+      margin-top: 20px;
+      font-weight: bold;
+    }
+
+    .buy {
+      color: #00ff99;
+    }
+
+    .sell {
+      color: #ff4d4d;
+    }
+
+    .wait {
+      color: #cccccc;
+    }
+/* スマホ用 */
+@media (max-width: 767px) {
+  .chart-grid {
+    display: flex;
+    flex-direction: column; /* ← チャートを縦に並べる */
+    gap: 20px;
+  }
+
+  .chart-box {
+    width: "100%";
+    height: 400px; /* ← スマホでは少し小さめに調整 */
+  }
+
+  /* 他のフォントやパディングもスマホ用に */
+  h1 {
+    font-size: 1.5rem;
+  }
+
+  .signal {
+    font-size: 1.2rem;
+  }
+
+  .card {
+    padding: 16px;
+  }
+}
+    
+  </style>
+</head>
+<body>
+
+  <h1>RSI + ボリンジャーバンド アラート</h1>
+
+  <div class="chart-grid">
+    <div class="chart-box">
+      <div id="tv_chart_1"></div>
+      <div class="alert-overlay" id="alert_1"></div>
+    </div>
+    <div class="chart-box">
+      <div id="tv_chart_2"></div>
+      <div class="alert-overlay" id="alert_2"></div>
+    </div>
+    <div class="chart-box">
+      <div id="tv_chart_3"></div>
+      <div class="alert-overlay" id="alert_3"></div>
+    </div>
+    <div class="chart-box">
+      <div id="tv_chart_4"></div>
+      <div class="alert-overlay" id="alert_4"></div>
+    </div>
+    <div class="chart-box">
+      <div id="tv_chart_5"></div>
+      <div class="alert-overlay" id="alert_5"></div>
+    </div>
+    <div class="chart-box">
+      <div id="tv_chart_6"></div>
+      <div class="alert-overlay" id="alert_6"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>ドル円レート（USD/JPY）</h2>
+    <p id="rate">取得中...</p>
+    <p>RSI: <span id="rsi">-</span></p>
+    <div id="signal" class="signal">判定中...</div>
+  </div>
+
+<script>
+const chartConfigs = [
+  { id: "tv_chart_1", symbol: "FX:USDJPY", interval: "1", label: "1分足" },
+  { id: "tv_chart_2", symbol: "FX:USDJPY", interval: "5", label: "5分足" },
+  { id: "tv_chart_3", symbol: "FX:USDJPY", interval: "15", label: "15分足" },
+  { id: "tv_chart_4", symbol: "FX:USDJPY", interval: "30", label: "30分足" },
+  { id: "tv_chart_5", symbol: "FX:USDJPY", interval: "60", label: "1時間足" },
+  { id: "tv_chart_6", symbol: "FX:USDJPY", interval: "240", label: "4時間足" },
+];
+
+const priceDataMap = {}; // 各intervalごとの配列を保持
+
+function calculateRSI(prices, period = 14) {
+  if (prices.length < period + 1) return null;
+  let gains = 0, losses = 0;
+  for (let i = prices.length - period; i < prices.length; i++) {
+    const diff = prices[i] - prices[i - 1];
+    if (diff >= 0) gains += diff;
+    else losses -= diff;
+  }
+  const avgGain = gains / period;
+  const avgLoss = losses / period;
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return 100 - (100 / (1 + rs));
+}
+
+function calculateBollingerBands(prices, period = 20, stdDevMult = 2) {
+  if (prices.length < period) return null;
+  const recentPrices = prices.slice(-period);
+  const mean = recentPrices.reduce((a, b) => a + b) / period;
+  const variance = recentPrices.reduce((sum, p) => sum + Math.pow(p - mean, 2), 0) / period;
+  const stdDev = Math.sqrt(variance);
+  return {
+    upper: mean + stdDevMult * stdDev,
+    lower: mean - stdDevMult * stdDev,
+    middle: mean
+  };
+}
+
+function updateOverlayAlert(rsi, price, boll, index) {
+  const el = document.getElementById(`alert_${index + 1}`);
+  el.classList.remove("alert-buy", "alert-sell", "alert-wait");
+
+  if (rsi === null || !boll) {
+    el.textContent = "計算中...";
+    el.classList.add("alert-wait");
+  } else if (rsi < 30 && price < boll.lower) {
+    el.textContent = "💡 買いシグナル";
+    el.classList.add("alert-buy");
+  } else if (rsi > 70 && price > boll.upper) {
+    el.textContent = "⚠️ 売りシグナル";
+    el.classList.add("alert-sell");
+  } else {
+    el.textContent = "様子見中";
+    el.classList.add("alert-wait");
+  }
+
+  el.style.display = "block";
+}
+
+function updateRSISignal(rsi) {
+  const rsiText = document.getElementById("rsi");
+  const signalText = document.getElementById("signal");
+
+  if (rsi === null) {
+    rsiText.textContent = "-";
+    signalText.textContent = "計算中...";
+    signalText.className = "signal wait";
+  } else {
+    rsiText.textContent = rsi.toFixed(2);
+    if (rsi < 30) {
+      signalText.textContent = "買いシグナル";
+      signalText.className = "signal buy";
+    } else if (rsi > 70) {
+      signalText.textContent = "売りシグナル";
+      signalText.className = "signal sell";
+    } else {
+      signalText.textContent = "様子見中";
+      signalText.className = "signal wait";
+    }
+  }
+}
+
+function fetchAndUpdateAll() {
+  fetch('https://api.unirateapi.com/api/rates?api_key=h65qd0ij5fNu2TlJkWtzaiDSss70pXNVDHLYUTfrFjD2az8limCXMVBbaEf5BBZT&from=USD')
+    .then(response => response.json())
+    .then(data => {
+      const rate = data.rates.JPY;
+      document.getElementById("rate").textContent = rate.toFixed(2);
+
+      chartConfigs.forEach((cfg, index) => {
+        const interval = cfg.interval;
+        if (!priceDataMap[interval]) priceDataMap[interval] = [];
+        const arr = priceDataMap[interval];
+
+        arr.push(rate + Math.random() * 0.2 - 0.1); // 仮データ
+        if (arr.length > 100) arr.shift();
+
+        const rsi = calculateRSI(arr);
+        const boll = calculateBollingerBands(arr);
+        if (interval === "5") updateRSISignal(rsi);
+        updateOverlayAlert(rsi, arr[arr.length - 1], boll, index);
+      });
+    })
+    .catch(err => {
+      console.error("為替データ取得失敗:", err);
+      document.getElementById("rate").textContent = "取得失敗";
+      chartConfigs.forEach((cfg, index) => updateOverlayAlert(null, null, null, index));
+      updateRSISignal(null);
+    });
+}
+
+chartConfigs.forEach(cfg => {
+  new TradingView.widget({
+    container_id: cfg.id,
+    symbol: cfg.symbol,
+    interval: cfg.interval,
+    timezone: "Asia/Tokyo",
+    theme: "dark",
+    style: "1",
+    locale: "ja",
+    width: "800",
+    height: "500",
+    toolbar_bg: "#f1f3f6",
+    enable_publishing: false,
+    hide_top_toolbar: false,
+    hide_side_toolbar: false,
+    allow_symbol_change: false,
+    studies: ["STD;Bollinger_Bands","STD;Divergence%1Indicator"],
+    withdateranges: true,
+    details: true
+  });
+});
+
+fetchAndUpdateAll();
+setInterval(fetchAndUpdateAll, 300000); // 5分ごと
+</script>
+
+</body>
+</html>
